@@ -1,0 +1,4 @@
+启动后端
+uvicorn main:app --reload --port 8001
+export SILICONFLOW_API_KEY="sk-cieanfgxijrnpjwcryoacvulkmddronmgetnogpblipjrwhn"
+set SILICONFLOW_API_KEY=sk-cieanfgxijrnpjwcryoacvulkmddronmgetno
