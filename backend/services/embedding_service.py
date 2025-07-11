@@ -1,336 +1,189 @@
-import os
-import dotenv
-dotenv.load_dotenv()
+from pathlib import Path
+from fastapi import APIRouter, HTTPException, Body
+from fastapi.responses import JSONResponse, FileResponse
+from typing import Dict, List, Any
 import json
 from datetime import datetime
-from enum import Enum
-import boto3
-import requests  # 新增requests库用于API调用
-from typing import List  # 新增类型提示
-from langchain_community.embeddings import BedrockEmbeddings, OpenAIEmbeddings, HuggingFaceEmbeddings
+import logging
+import numpy as np
+from config.settings import EMBEDDING_DIR, METADATA_FILES, FILE_NAMING, CHUNK_DIR
 
-class EmbeddingProvider(str, Enum):
-    """
-    嵌入提供商枚举类，定义支持的嵌入模型提供商
-    """
-    OPENAI = "openai"
-    BEDROCK = "bedrock"
-    HUGGINGFACE = "huggingface"
-    SILICONFLOW = "siliconflow"  # 新增硅基流动
+# 初始化路由
+router = APIRouter()
 
-class EmbeddingConfig:
-    """
-    嵌入配置类，用于存储嵌入模型的配置信息
-    """
-    def __init__(self, provider: str, model_name: str):
-        """
-        初始化嵌入配置
+# 设置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-        参数:
-            provider: 嵌入提供商名称
-            model_name: 嵌入模型名称
-        """
-        self.provider = provider
-        self.model_name = model_name
-        self.aws_region = "ap-southeast-1"  # 可配置
-
-class SiliconFlowEmbeddings:
-    """硅基流动嵌入模型实现"""
-
-    def __init__(self, model_name: str, api_key: str):
-        self.model_name = model_name
-        self.api_key = api_key
-        self.base_url = "https://api.siliconflow.cn/v1/embeddings"
-
-    def embed_query(self, text: str) -> List[float]:
-        """为单个文本创建嵌入向量"""
-        return self._embed_batch([text])[0]
-
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        """为文档列表创建嵌入向量"""
-        return self._embed_batch(texts)
-
-    def _embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """批量处理嵌入请求"""
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "model": self.model_name,
-            "input": texts
-        }
-
-        response = requests.post(
-            self.base_url,
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
-
-        if response.status_code != 200:
-            raise ValueError(
-                f"SiliconFlow API 请求失败: {response.status_code} - {response.text}"
-            )
-
-        response_data = response.json()
-        return [item["embedding"] for item in response_data["data"]]
-
-class EmbeddingFactory:
-    """
-    嵌入工厂类，负责创建不同提供商的嵌入函数
-    """
-    @staticmethod
-    def create_embedding_function(config: EmbeddingConfig):
-        """
-        根据配置创建嵌入函数
-
-        参数:
-            config: 嵌入配置对象
-
-        返回:
-            嵌入函数对象
-
-        异常:
-            ValueError: 当提供商不支持时抛出
-        """
-        if config.provider == EmbeddingProvider.BEDROCK:
-            bedrock_client = boto3.client(
-                service_name='bedrock-runtime',
-                region_name=config.aws_region,
-                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
-            )
-            return BedrockEmbeddings(
-                client=bedrock_client,
-                model_id=config.model_name
-            )
-
-        elif config.provider == EmbeddingProvider.OPENAI:
-            return OpenAIEmbeddings(
-                model=config.model_name,
-                openai_api_key=os.getenv('OPENAI_API_KEY')
-            )
-
-        elif config.provider == EmbeddingProvider.HUGGINGFACE:
-            return HuggingFaceEmbeddings(
-                model_name=config.model_name
-            )
-
-        elif config.provider == EmbeddingProvider.SILICONFLOW:
-            #api_key = os.getenv('SILICONFLOW_API_KEY')
-            api_key = "sk-cieanfgxijrnpjwcryoacvulkmddronmgetnogpblipjrwhn"
-            if not api_key:
-                raise ValueError("未设置 SILICONFLOW_API_KEY 环境变量")
-            return SiliconFlowEmbeddings(
-                model_name=config.model_name,
-                api_key=api_key
-            )
-
-        raise ValueError(f"不支持的嵌入提供商: {config.provider}")
-
-class EmbeddingService:
-    """
-    嵌入服务类，提供创建和管理文本嵌入的功能
-    """
-    def __init__(self):
-        """初始化嵌入服务，创建嵌入工厂实例"""
-        self.embedding_factory = EmbeddingFactory()
-
-    def create_embeddings(self, input_data: dict, config: EmbeddingConfig) -> tuple:
-        """
-        创建文本块的嵌入向量并返回必要的信息
-
-        参数:
-            input_data: 包含文本块和元数据的输入数据字典
-            config: 嵌入配置对象
-
-        返回:
-            包含嵌入结果和元数据的元组
-        """
-        embedding_function = self.embedding_factory.create_embedding_function(config)
-
-        chunks = input_data.get('chunks', [])
-        filename = input_data.get('metadata', {}).get('filename', '')  # 获取文件名
-
-        # 批处理大小
-        BATCH_SIZE = 20
-        results = []
-
-        # 对支持批量处理的提供商使用批处理
-        if config.provider in [EmbeddingProvider.OPENAI]:
-            for i in range(0, len(chunks), BATCH_SIZE):
-                batch = chunks[i:i + BATCH_SIZE]
-                # 提取当前批次的文本内容
-                texts = [chunk.get("content", "") for chunk in batch]
-
-                # 批量获取embeddings
-                embedding_vectors = embedding_function.embed_documents(texts)
-
-                # 将结果与原始chunk数据组合
-                for chunk, embedding_vector in zip(batch, embedding_vectors):
-                    metadata = {
-                        "chunk_id": chunk["metadata"]["chunk_id"],
-                        "page_number": chunk["metadata"]["page_number"],
-                        "page_range": chunk["metadata"]["page_range"],
-                        "content": chunk["content"],
-                        "word_count": chunk["metadata"]["word_count"],
-                        # "chunking_method": input_data.get("chunking_method", "loaded"),
-                        "total_chunks": len(chunks),
-                        "embedding_provider": config.provider,
-                        "embedding_model": config.model_name,
-                        "embedding_timestamp": datetime.now().isoformat(),
-                        "vector_dimension": len(embedding_vector),
-                        "filename": filename  # 添加文件名到metadata
-                    }
-
-                    embedding_result = {
-                        "embedding": embedding_vector,
-                        "metadata": metadata
-                    }
-                    results.append(embedding_result)
-        else:
-            # 对其他提供商保持原有的逐个处理逻辑
-            for chunk in chunks:
-                embedding_vector = embedding_function.embed_query(chunk["content"])
-                metadata = {
-                    "chunk_id": chunk["metadata"]["chunk_id"],
-                    "page_number": chunk["metadata"]["page_number"],
-                    "page_range": chunk["metadata"]["page_range"],
-                    "content": chunk["content"],
-                    "word_count": chunk["metadata"]["word_count"],
-                    # "chunking_method": input_data.get("chunking_method", "loaded"),
-                    "total_chunks": len(chunks),
-                    "embedding_provider": config.provider,
-                    "embedding_model": config.model_name,
-                    "embedding_timestamp": datetime.now().isoformat(),
-                    "vector_dimension": len(embedding_vector),
-                    "filename": filename  # 添加文件名到metadata
-                }
-
-                embedding_result = {
-                    "embedding": embedding_vector,
-                    "metadata": metadata
-                }
-                results.append(embedding_result)
-
-        # 返回结果和空的metadata（因为metadata已经包含在每个embedding中）
-        return results, {}
-
-    def save_embeddings(self, doc_name: str, embeddings: list) -> str:
-        """
-        保存嵌入向量到JSON文件
-
-        参数:
-            doc_name: 文档名称
-            embeddings: 嵌入向量列表
-
-        返回:
-            保存的文件路径
-        """
-        os.makedirs("02-embedded-docs", exist_ok=True)
-
-        # 获取第一个embedding的元数据
-        first_embedding = embeddings[0]
-        provider = first_embedding["metadata"]["embedding_provider"]
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-
-        # 保持原始文件名（包括扩展名）
-        base_name = doc_name.split('_')[0]
-        if not base_name.endswith('.pdf'):
-            base_name += '.pdf'
-
-        # 构建新的文件名：基础名称_provider_时间戳
-        filename = f"{base_name.replace('.pdf', '')}_{provider}_{timestamp}.json"
-        filepath = os.path.join("02-embedded-docs", filename)
-
-        # 从第一个embedding中获取配置信息
-        config_info = {
-            "filename": base_name,  # 使用完整的文件名（包括.pdf）
-            "chunked_doc_name": doc_name,  # Add chunked_doc_name
-            "created_at": datetime.now().isoformat(),
-            "embedding_provider": provider,
-            "embedding_model": first_embedding["metadata"]["embedding_model"],
-            "vector_dimension": first_embedding["metadata"]["vector_dimension"]
-        }
-
-        class CompactJSONEncoder(json.JSONEncoder):
-            """自定义JSON编码器，用于优化嵌入向量的存储格式"""
-            def default(self, obj):
-                if isinstance(obj, datetime):
-                    return obj.isoformat()
-                return super().default(obj)
-
-            def encode(self, obj):
-                # 将 embedding 数组转换为单行，其他保持格式化
-                def format_list(lst):
-                    if isinstance(lst, list):
-                        # 检查是否为 embedding 数组（通过检查第一个元素是否为数字）
-                        if lst and isinstance(lst[0], (int, float)):
-                            return '[' + ','.join(map(str, lst)) + ']'
-                        return [format_list(item) for item in lst]
-                    elif isinstance(lst, dict):
-                        return {k: format_list(v) for k, v in lst.items()}
-                    return lst
-
-                return super().encode(format_list(obj))
-
-        # 保存数据，配置信息放在顶层
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump({
-                **config_info,  # 配置信息放在顶层
-                "embeddings": embeddings
-            }, f, ensure_ascii=False, indent=2, cls=CompactJSONEncoder)
-
-        return filepath
-
-    def create_single_embedding(self, text: str, provider: str, model: str) -> list:
-        """
-        创建单个文本的嵌入向量
-
-        参数:
-            text: 需要嵌入的文本
-            provider: 嵌入提供商
-            model: 嵌入模型名称
-
-        返回:
-            嵌入向量列表
-        """
-        config = EmbeddingConfig(provider=provider, model_name=model)
-        embedding_function = self.embedding_factory.create_embedding_function(config)
-        return embedding_function.embed_query(text)
-
-    def get_document_embedding_config(self, collection_name: str) -> EmbeddingConfig:
-        """
-        从已存在的文档中获取嵌入配置
-
-        参数:
-            collection_name: 集合名称
-
-        返回:
-            嵌入配置对象
-
-        异常:
-            ValueError: 当找不到匹配的嵌入配置时抛出
-        """
+def load_metadata() -> Dict[str, Dict[str, Any]]:
+    """加载元数据"""
+    metadata: Dict[str, Dict[str, Any]] = {"documents": {}}
+    if METADATA_FILES["embedding"].exists():
         try:
-            # 只取第一个下划线之前的部分
-            doc_name = collection_name.split('_')[0]
+            with open(METADATA_FILES["embedding"], "r", encoding="utf-8") as f:
+                loaded_data = json.load(f)
+                if isinstance(loaded_data, dict) and "documents" in loaded_data:
+                    metadata = loaded_data
+                else:
+                    logger.error("Metadata file contains invalid data structure")
+        except json.JSONDecodeError:
+            logger.error("Invalid JSON in metadata file. Creating new metadata.")
+    return metadata
 
-            # 查找对应的embedding文件
-            embedded_docs_dir = "02-embedded-docs"
-            for filename in os.listdir(embedded_docs_dir):
-                if filename.endswith('.json'):
-                    with open(os.path.join(embedded_docs_dir, filename), 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                        # 使用 filename 而不是 document_name
-                        if data.get("filename") == doc_name:
-                            return EmbeddingConfig(
-                                provider=data.get("embedding_provider"),
-                                model_name=data.get("embedding_model")
-                            )
+def save_metadata(metadata: Dict) -> None:
+    """保存元数据"""
+    with open(METADATA_FILES["embedding"], "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, ensure_ascii=False)
 
-            raise ValueError(f"No matching embedding configuration found for collection: {collection_name}")
-        except Exception as e:
-            raise ValueError(f"Error getting embedding config: {str(e)}")
+@router.post("/documents/{file_id}/embed")
+async def embed_document(
+    file_id: str,
+    request: Dict = Body(...)
+):
+    """对文档进行向量嵌入"""
+    # 加载元数据
+    metadata = load_metadata()
+    
+    # 从chunk目录读取分块文件
+    matching_files = list(CHUNK_DIR.glob(f"*{file_id}*_chunked.json"))
+    if not matching_files:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": "文档不存在，请先进行分块",
+                "error_code": "document_not_found",
+                "file_id": file_id
+            }
+        )
+    
+    input_file = matching_files[0]
+    
+    # 读取分块数据
+    try:
+        with open(input_file, "r", encoding="utf-8") as f:
+            chunks_data = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取文件失败: {str(e)}")
+    
+    # 获取嵌入参数
+    model = request.get("model", "default")
+    params = request.get("params", {})
+    
+    # 对每个块进行向量嵌入
+    embeddings = []
+    for chunk in chunks_data["chunks"]:
+        # 这里应该调用实际的嵌入模型
+        # 目前使用随机向量作为示例
+        embedding = np.random.rand(768).tolist()  # 假设使用768维向量
+        embeddings.append({
+            "text": chunk["text"],
+            "embedding": embedding,
+            "metadata": {
+                "start": chunk["start"],
+                "end": chunk["end"],
+                "size": chunk["size"]
+            }
+        })
+    
+    # 生成时间戳
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # 获取原始文件名（不含扩展名）
+    original_filename = input_file.stem.split("_chunked")[0]
+    
+    # 构建新的文件名
+    output_filename = FILE_NAMING["embedding"].format(
+        original_name=original_filename,
+        file_id=file_id,
+        timestamp=timestamp
+    )
+    
+    # 创建嵌入结果数据
+    embedding_result = {
+        "file_id": file_id,
+        "filename": output_filename,
+        "model": model,
+        "params": params,
+        "embedding_count": len(embeddings),
+        "embeddings": embeddings,
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    # 保存嵌入结果
+    output_file = EMBEDDING_DIR / output_filename
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(embedding_result, f, ensure_ascii=False, indent=2)
+    
+    # 更新元数据
+    if file_id not in metadata["documents"]:
+        metadata["documents"][file_id] = {
+            "id": file_id,
+            "original_filename": original_filename,
+            "input_file": str(input_file),
+            "embeddings": []
+        }
+    
+    # 添加新的嵌入信息
+    embedding_info = {
+        "model": model,
+        "embedding_count": len(embeddings),
+        "timestamp": embedding_result["timestamp"],
+        "output_file": str(output_file)
+    }
+    metadata["documents"][file_id]["embeddings"].append(embedding_info)
+    save_metadata(metadata)
+    
+    return embedding_result
+
+@router.get("/documents/{file_id}/embeddings")
+async def get_document_embeddings(file_id: str):
+    """获取文档的嵌入向量"""
+    # 加载元数据
+    metadata = load_metadata()
+    
+    # 检查文档是否存在
+    if file_id not in metadata["documents"]:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    
+    document_info = metadata["documents"][file_id]
+    
+    # 检查是否有嵌入向量
+    if not document_info["embeddings"]:
+        raise HTTPException(status_code=404, detail="文档还未进行向量嵌入")
+    
+    # 获取最新的嵌入文件
+    latest_embedding = document_info["embeddings"][-1]
+    embedding_file = Path(latest_embedding["output_file"])
+    
+    if not embedding_file.exists():
+        raise HTTPException(status_code=404, detail="嵌入文件不存在")
+    
+    # 读取嵌入数据
+    with open(embedding_file, "r", encoding="utf-8") as f:
+        embedding_data = json.load(f)
+    
+    return embedding_data
+
+@router.delete("/documents/{file_id}/embeddings")
+async def delete_document_embeddings(file_id: str):
+    """删除文档的所有嵌入向量"""
+    # 加载元数据
+    metadata = load_metadata()
+    
+    # 检查文档是否存在
+    if file_id not in metadata["documents"]:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    
+    document_info = metadata["documents"][file_id]
+    
+    # 删除所有嵌入文件
+    for embedding_info in document_info["embeddings"]:
+        embedding_file = Path(embedding_info["output_file"])
+        if embedding_file.exists():
+            embedding_file.unlink()
+    
+    # 清空嵌入记录
+    document_info["embeddings"] = []
+    save_metadata(metadata)
+    
+    return {"status": "success", "message": "嵌入向量已删除"} 
