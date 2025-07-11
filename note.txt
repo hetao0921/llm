@@ -1,0 +1,7 @@
+测试
+
+uvicorn main:app --reload
+
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple 
+
+npm run dev
