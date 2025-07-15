@@ -52,6 +52,25 @@ const router = createRouter({
           name: 'TextGeneration',
           component: TextGeneration,
           meta: { title: '文本生成' }
+        },
+        // 新增金融术语标准化工具箱相关路由
+        {
+          path: 'fin-term-loading',
+          name: 'FinTermLoading',
+          component: () => import('../views/FinTermLoading.vue'),
+          meta: { title: '金融标准术语加载' }
+        },
+        {
+          path: 'fin-term-ner',
+          name: 'FinTermNER',
+          component: () => import('../views/FinTermNER.vue'),
+          meta: { title: '金融术语NER' }
+        },
+        {
+          path: 'fin-term-normalization',
+          name: 'FinTermNormalization',
+          component: () => import('../views/FinTermNormalization.vue'),
+          meta: { title: '金融术语标准化' }
         }
       ]
     }
