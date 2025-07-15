@@ -12,7 +12,8 @@ from config.settings import (
 # 导入服务模块
 from services import (
     loading_service, parsing_service, chunking_service, 
-    embedding_service, indexing_service, generation_service
+    embedding_service, indexing_service, generation_service,
+    finterm_service
 )
 
 # 创建FastAPI应用
@@ -34,6 +35,7 @@ app.include_router(chunking_service.router, prefix="/api/chunking", tags=["文�
 app.include_router(embedding_service.router, prefix="/api/embedding", tags=["向量嵌入"])
 app.include_router(indexing_service.router, prefix="/api/indexing", tags=["向量索引"])
 app.include_router(generation_service.router, prefix="/api/generation", tags=["文本生成"])
+app.include_router(finterm_service.router, prefix="/api/finterm", tags=["金融术语"])
 
 # 确保数据目录存在
 @app.on_event("startup")

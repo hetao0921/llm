@@ -36,6 +36,16 @@
         <el-icon><ChatDotRound /></el-icon>
         <span>文本生成</span>
       </el-menu-item>
+      <!-- 新增金融术语标准化工具箱主菜单及其子菜单 -->
+      <el-sub-menu index="fin-term-toolbox">
+        <template #title>
+          <el-icon><Collection /></el-icon>
+          <span>金融术语标准化工具箱</span>
+        </template>
+        <el-menu-item index="/fin-term-loading">金融标准术语加载</el-menu-item>
+        <el-menu-item index="/fin-term-ner">金融术语NER</el-menu-item>
+        <el-menu-item index="/fin-term-normalization">金融术语标准化</el-menu-item>
+      </el-sub-menu>
     </el-menu>
   </div>
 </template>
