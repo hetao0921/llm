@@ -29,6 +29,9 @@
           <el-option label="FLAT（无索引）" value="flat" />
         </el-select>
       </el-form-item>
+      <el-form-item label="集合名称">
+        <el-input v-model="collectionName" placeholder="请输入集合名称" style="width: 300px" />
+      </el-form-item>
       <el-form-item label="模型供应商">
         <el-select v-model="provider" placeholder="请选择模型供应商" style="width: 200px">
           <el-option label="siliconflow" value="siliconflow" />
@@ -71,6 +74,7 @@ const dbType = ref('chromadb')
 const indexType = ref('hnsw')
 const provider = ref('siliconflow')
 const modelName = ref('BAAI/bge-m3')
+const collectionName = ref('my_finterm_collection')
 const loadingList = ref(false)
 const loading = ref(false)
 const loadedFiles = ref([])
@@ -79,7 +83,7 @@ const uploadUrl = '/api/loading/files/upload'
 const uploadHeaders = { Accept: 'application/json' }
 
 const canLoad = computed(() => {
-  return fileId.value && dbType.value && (dbType.value !== 'chromadb' || indexType.value) && provider.value && modelName.value
+  return fileId.value && dbType.value && (dbType.value !== 'chromadb' || indexType.value) && provider.value && modelName.value && collectionName.value
 })
 
 function handleUploadSuccess(response, file, fileList) {
@@ -119,7 +123,8 @@ async function handleLoad() {
       db_type: dbType.value,
       index_type: indexType.value,
       provider: provider.value,
-      model_name: modelName.value
+      model_name: modelName.value,
+      collection_name: collectionName.value
     }
     const resp = await fetch('/api/finterm/load', {
       method: 'POST',
@@ -140,6 +145,7 @@ async function handleLoad() {
     // fileId.value = '' // 不清空，便于多次加载
     // dbType.value = 'chromadb' // 保持默认
     // indexType.value = 'hnsw' // 保持默认
+    // collectionName.value = 'my_finterm_collection' // 保持默认
     provider.value = 'siliconflow'
     modelName.value = 'BAAI/bge-m3'
   }
