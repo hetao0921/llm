@@ -73,25 +73,27 @@ async def load_finterm(
         validate_end = "2026-07-15 19:00:00"
         # chromadb
         chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-        collection_name = "my_finterm_collection"
+        collection_name = request.get('collection_name') or "my_finterm_collection"
         if collection_name in [c.name for c in chroma_client.list_collections()]:
             chroma_client.delete_collection(collection_name)
         collection = chroma_client.create_collection(name=collection_name)
         results = []
         chunk_size = 1000
-        for chunk in read_csv_auto_encoding(file_path, header=0, chunksize=chunk_size):
+        for chunk in read_csv_auto_encoding(file_path, header=None, chunksize=chunk_size):
             for idx, row in chunk.iterrows():
                 # 直接按列索引取前4列，并打印调试
                 try:
                     finterm_original = str(row.iloc[0]) if len(row) > 0 else ''
-                    finterm_classify = str(row.iloc[1]) if len(row) > 1 else ''
-                    finterm_normalization = str(row.iloc[2]) if len(row) > 2 else ''
-                    finterm_normalization_chinese = str(row.iloc[3]) if len(row) > 3 else ''
-                    print(f"row debug: {finterm_original}, {finterm_classify}, {finterm_normalization}, {finterm_normalization_chinese}")
+                    finterm_original_denoise = str(row.iloc[1]) if len(row) > 1 else ''
+                    finterm_classify = str(row.iloc[2]) if len(row) > 2 else ''
+                    finterm_normalization = str(row.iloc[3]) if len(row) > 3 else ''
+                    finterm_normalization_chinese = str(row.iloc[4]) if len(row) > 4 else ''
+                    finterm_category = str(row.iloc[5]) if len(row) > 5 else ''
+                    print(f"row debug: {finterm_original}, {finterm_original_denoise}, {finterm_classify}, {finterm_normalization}, {finterm_normalization_chinese}, {finterm_category}")
                 except Exception as e:
                     print(f"row iloc error: {e}")
-                    finterm_original = finterm_classify = finterm_normalization = finterm_normalization_chinese = ''
-                # 向量化C列
+                    finterm_original = finterm_original_denoise = finterm_classify = finterm_normalization = finterm_normalization_chinese = finterm_category = ''
+                # D列向量化
                 embedding = get_embedding(model_name or '', finterm_normalization, provider or '')
                 # 生成元数据
                 finterm_id = str(uuid.uuid4())
@@ -100,10 +102,11 @@ async def load_finterm(
                     "id": finterm_id,
                     "finterm_code": finterm_code,
                     "finterm_original": finterm_original,
+                    "finterm_original_denoise": finterm_original_denoise,
                     "finterm_classify": finterm_classify,
                     "finterm_normalization": finterm_normalization,
                     "finterm_normalization_chinese": finterm_normalization_chinese,
-                    "finterm_category": "",
+                    "finterm_category": finterm_category,
                     "insert_time": now_str,
                     "update_time": now_str,
                     "validate_start_date": validate_start,
