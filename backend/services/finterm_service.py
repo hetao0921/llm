@@ -93,6 +93,11 @@ async def load_finterm(
                 except Exception as e:
                     print(f"row iloc error: {e}")
                     finterm_original = finterm_original_denoise = finterm_classify = finterm_normalization = finterm_normalization_chinese = finterm_category = ''
+                # D列为空、nan、null、N/A等则跳过
+                skip_values = {'', 'nan', 'null', 'NULL', 'N/A', 'none', None}
+                norm_val = finterm_normalization.strip().lower() if isinstance(finterm_normalization, str) else str(finterm_normalization).strip().lower()
+                if norm_val in skip_values:
+                    continue
                 # D列向量化
                 embedding = get_embedding(model_name or '', finterm_normalization, provider or '')
                 # 生成元数据
