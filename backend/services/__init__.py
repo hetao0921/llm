@@ -5,7 +5,11 @@ from . import (
     chunking_service,
     embedding_service,
     indexing_service,
-    generation_service
+    generation_service,
+    finterm_service,
+    finterm_loading_service,
+    finterm_ner_service,
+    finterm_normalization_service
 )
 
 __all__ = [
@@ -14,5 +18,9 @@ __all__ = [
     'chunking_service',
     'embedding_service',
     'indexing_service',
-    'generation_service'
+    'generation_service',
+    'finterm_service',
+    'finterm_loading_service',
+    'finterm_ner_service',
+    'finterm_normalization_service'
 ] 
