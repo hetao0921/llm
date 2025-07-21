@@ -10,10 +10,17 @@
           :on-error="handleUploadError"
           :file-list="fileList"
           :limit="1"
+          :on-exceed="handleExceed"
+          :before-remove="handleBeforeRemove"
           :action="uploadUrl"
           :headers="uploadHeaders"
         >
           <el-button type="primary">选择文件</el-button>
+          <template #tip>
+            <div class="el-upload__tip">
+              <p v-if="fileId">当前已上传文件ID: {{ fileId }}</p>
+            </div>
+          </template>
         </el-upload>
       </el-form-item>
       <el-form-item label="选择向量数据库类型">
@@ -46,6 +53,9 @@
       </el-form-item>
       <el-form-item>
         <el-button type="success" :disabled="!canLoad || loading" @click="handleLoad">加载</el-button>
+        <span v-if="!canLoad" class="help-text">
+          （请确保已上传文件并填写所有必填项）
+        </span>
       </el-form-item>
     </el-form>
 
@@ -65,7 +75,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 
 const fileList = ref([])
@@ -82,16 +92,47 @@ const loadedFiles = ref([])
 const uploadUrl = '/api/loading/files/upload'
 const uploadHeaders = { Accept: 'application/json' }
 
+// 扩展 canLoad 计算属性，增加详细的日志
 const canLoad = computed(() => {
-  return fileId.value && dbType.value && (dbType.value !== 'chromadb' || indexType.value) && provider.value && modelName.value && collectionName.value
+  const result = fileId.value && dbType.value && 
+    (dbType.value !== 'chromadb' || indexType.value) && 
+    provider.value && modelName.value && collectionName.value
+  
+  console.log('canLoad check:', {
+    fileId: Boolean(fileId.value),
+    dbType: Boolean(dbType.value),
+    indexTypeCheck: dbType.value !== 'chromadb' || Boolean(indexType.value),
+    provider: Boolean(provider.value),
+    modelName: Boolean(modelName.value),
+    collectionName: Boolean(collectionName.value),
+    result
+  })
+  
+  return result
 })
 
-function handleUploadSuccess(response, file, fileList) {
+// 阻止文件被移除，因为这会导致fileId丢失
+function handleBeforeRemove(file, fileList) {
+  if (fileId.value) {
+    ElMessage.warning('移除文件会导致当前选择的文件ID丢失，请谨慎操作')
+    return false
+  }
+  return true
+}
+
+// 处理超出文件数量限制
+function handleExceed() {
+  ElMessage.warning('只能上传1个文件，请先移除当前文件再上传新文件')
+}
+
+function handleUploadSuccess(response, file, uploadFileList) {
   // 兼容 el-upload 可能的 response 包裹
   const res = response && response.file_id ? response : (response && response.response ? response.response : null)
-  console.log('upload response:', res)
+  console.log('upload response:', res, 'file:', file, 'fileList:', uploadFileList)
   if (res && res.file_id) {
     fileId.value = res.file_id
+    // 确保文件列表与上传的文件保持一致
+    fileList.value = uploadFileList
     ElMessage.success('文件上传成功')
   } else {
     fileId.value = ''
@@ -116,6 +157,16 @@ async function handleLoad() {
     ElMessage.warning('请先上传文件')
     return
   }
+  
+  console.log('开始加载，当前状态:', {
+    fileId: fileId.value,
+    dbType: dbType.value,
+    indexType: indexType.value,
+    provider: provider.value,
+    modelName: modelName.value,
+    collectionName: collectionName.value
+  })
+  
   loading.value = true
   try {
     const body = {
@@ -142,17 +193,57 @@ async function handleLoad() {
     ElMessage.error('请求失败: ' + (e.message || e))
   } finally {
     loading.value = false
-    // fileId.value = '' // 不清空，便于多次加载
-    // dbType.value = 'chromadb' // 保持默认
-    // indexType.value = 'hnsw' // 保持默认
-    // collectionName.value = 'my_finterm_collection' // 保持默认
-    provider.value = 'siliconflow'
-    modelName.value = 'BAAI/bge-m3'
+    
+    // 保留所有必要的值，使按钮保持可点击状态
+    // 不重置 fileId，允许多次加载同一个文件
+    // provider 和 modelName 也不应该重置为空值，而是保持现有值或恢复默认值
+    if (!provider.value) provider.value = 'siliconflow'
+    if (!modelName.value) modelName.value = 'BAAI/bge-m3'
+    
+    // 确保 dbType 和 collectionName 有值
+    if (!dbType.value) dbType.value = 'chromadb'
+    if (!collectionName.value) collectionName.value = 'my_finterm_collection'
+    
+    // 如果 dbType 是 chromadb，确保 indexType 有值
+    if (dbType.value === 'chromadb' && !indexType.value) {
+      indexType.value = 'hnsw'
+    }
+    
+    console.log('加载完成后状态:', {
+      fileId: fileId.value,
+      dbType: dbType.value,
+      indexType: indexType.value,
+      provider: provider.value,
+      modelName: modelName.value,
+      collectionName: collectionName.value,
+      canLoad: canLoad.value
+    })
   }
 }
 
+// 加载已有的文件列表
+async function fetchLoadedFiles() {
+  try {
+    loadingList.value = true
+    const resp = await fetch('/api/loading/files')
+    const data = await resp.json()
+    if (resp.ok && Array.isArray(data)) {
+      loadedFiles.value = data
+    }
+  } catch (e) {
+    console.error('获取文件列表失败:', e)
+  } finally {
+    loadingList.value = false
+  }
+}
+
+// 组件挂载时获取文件列表
+onMounted(() => {
+  fetchLoadedFiles()
+})
+
 watch([fileId, dbType, indexType, provider, modelName], (vals) => {
-  console.log('canLoad deps:', vals, 'canLoad:', canLoad.value)
+  console.log('canLoad deps changed:', vals, 'canLoad:', canLoad.value)
 })
 </script>
 
@@ -162,5 +253,10 @@ watch([fileId, dbType, indexType, provider, modelName], (vals) => {
 }
 .fin-term-form {
   max-width: 500px;
+}
+.help-text {
+  margin-left: 10px;
+  color: #909399;
+  font-size: 12px;
 }
 </style> 
