@@ -153,17 +153,22 @@ const classifications = [
 
 // 状态变量
 const inputText = ref('')
-const selectedClassifications = ref(['E', 'D', 'F']) // 默认选择一些常用分类
+const selectedClassifications = ref([])  // 初始化为空数组
 const loading = ref(false)
 const nerResults = ref({
   text: '',
   entities: []
 })
-const selectAll = ref(false)
-const isIndeterminate = ref(true)
+const selectAll = ref(true)  // 默认为全选
+const isIndeterminate = ref(false)  // 默认不是中间状态
 
 // 初始化检查选中状态
 onMounted(() => {
+  // 如果默认全选，则选中所有分类
+  if (selectAll.value) {
+    selectedClassifications.value = classifications.map(item => item.code)
+  }
+  
   // 检查初始状态
   const checkedCount = selectedClassifications.value.length
   selectAll.value = checkedCount === classifications.length
