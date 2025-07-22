@@ -243,7 +243,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { InfoFilled } from '@element-plus/icons-vue'
 
@@ -276,9 +276,17 @@ const modelName = ref('BAAI/bge-m3')  // 默认使用BAAI/bge-m3
 const dbType = ref('chromadb')
 const indexType = ref('hnsw')
 const collectionName = ref('my_finterm_collection')
-const selectedClassifications = ref(['E', 'D', 'F']) // 默认选择一些常用分类
-const selectAllClasses = ref(false)
-const isClassIndeterminate = ref(true)
+const selectedClassifications = ref([])  // 初始化为空数组
+const selectAllClasses = ref(true)  // 默认全选
+const isClassIndeterminate = ref(false)  // 初始状态不是不确定状态
+
+// 在组件创建时初始化选择状态
+const initClassifications = () => {
+  if (selectAllClasses.value) {
+    // 如果是全选，则选中所有分类
+    selectedClassifications.value = classifications.map(item => item.code)
+  }
+}
 
 // 数据库类型变更处理
 const handleDbTypeChange = (val) => {
@@ -440,6 +448,11 @@ const performNormalization = async () => {
     loading.value = false
   }
 }
+
+// 在组件挂载时初始化分类选择
+onMounted(() => {
+  initClassifications()
+})
 </script>
 
 <style scoped>
