@@ -61,7 +61,7 @@
 
     <el-divider />
     <h2>已加载文件列表 <span v-if="loadedFiles.length">（共 {{ loadedFiles.length }} 条）</span></h2>
-    <el-table :data="loadedFiles" style="width: 100%" v-loading="loadingList">
+    <el-table :data="loadedFiles.slice(0, 10)" style="width: 100%" v-loading="loadingList">
       <el-table-column prop="name" label="文件名" />
       <el-table-column prop="insert_time" label="加载时间" />
       <el-table-column prop="update_time" label="更新时间" />
