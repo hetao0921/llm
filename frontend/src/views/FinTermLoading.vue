@@ -60,14 +60,24 @@
     </el-form>
 
     <el-divider />
-    <h2>已加载文件列表 <span v-if="loadedFiles.length">（共 {{ loadedFiles.length }} 条）</span></h2>
-    <el-table :data="loadedFiles.slice(0, 10)" style="width: 100%" v-loading="loadingList">
-      <el-table-column prop="name" label="文件名" />
-      <el-table-column prop="insert_time" label="加载时间" />
-      <el-table-column prop="update_time" label="更新时间" />
-      <el-table-column prop="status" label="文件状态">
+    <h2>已加载文件列表 <span v-if="loadedFiles.length || loadingList">（共 {{ totalLoaded }} 条）</span></h2>
+    <div v-if="loadingList" style="margin-bottom: 10px; color: #909399;">
+      <el-icon style="vertical-align: middle;"><i class="el-icon-loading"></i></el-icon>
+      正在获取数据...
+    </div>
+    <el-table :data="loadedFiles" style="width: 100%" v-loading="loadingList">
+      <el-table-column prop="document" label="文件名" />
+      <el-table-column prop="metadata.insert_time" label="加载时间">
+        <template #default="scope">{{ scope.row.metadata?.insert_time }}</template>
+      </el-table-column>
+      <el-table-column prop="metadata.update_time" label="更新时间">
+        <template #default="scope">{{ scope.row.metadata?.update_time }}</template>
+      </el-table-column>
+      <el-table-column prop="metadata.isvalidate" label="文件状态">
         <template #default="scope">
-          <el-tag :type="scope.row.status === '有效' ? 'success' : 'danger'">{{ scope.row.status }}</el-tag>
+          <el-tag :type="scope.row.metadata?.isvalidate === '1' ? 'success' : 'danger'">
+            {{ scope.row.metadata?.isvalidate === '1' ? '有效' : '无效' }}
+          </el-tag>
         </template>
       </el-table-column>
     </el-table>
@@ -188,7 +198,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onActivated } from 'vue'
 import { ElMessage } from 'element-plus'
 
 const fileList = ref([])
@@ -344,20 +354,35 @@ async function handleLoad() {
 async function fetchLoadedFiles() {
   try {
     loadingList.value = true
-    const resp = await fetch('/api/loading/files')
+    // 调用新的后端接口
+    const resp = await fetch(`/api/finterm/collection/preview?collection_name=${collectionName.value}`)
     const data = await resp.json()
-    if (resp.ok && Array.isArray(data)) {
-      loadedFiles.value = data
+    if (resp.ok && data.status === 'success') {
+      loadedFiles.value = data.items || []
+      totalLoaded.value = data.total || loadedFiles.value.length
+    } else {
+      loadedFiles.value = []
+      totalLoaded.value = 0
+      ElMessage.error(data.message || '获取文件列表失败')
     }
   } catch (e) {
-    console.error('获取文件列表失败:', e)
+    loadedFiles.value = []
+    totalLoaded.value = 0
+    ElMessage.error('获取文件列表失败: ' + (e.message || e))
   } finally {
     loadingList.value = false
   }
 }
 
+// 新增总数变量
+const totalLoaded = ref(0)
+
 // 组件挂载时获取文件列表
 onMounted(() => {
+  fetchLoadedFiles()
+})
+// 页面激活时也获取文件列表（适配keep-alive或菜单切换）
+onActivated && onActivated(() => {
   fetchLoadedFiles()
 })
 

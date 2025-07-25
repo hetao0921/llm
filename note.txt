@@ -9,3 +9,6 @@ npm run dev
 =======
 测试
 >>>>>>> 050e744 (好好学习，天天向上)
+
+
+my company has a A-share.

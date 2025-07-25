@@ -719,3 +719,39 @@ async def test_finterm(
     except Exception as e:
         print(f"测试过程中出错: {e}")
         raise HTTPException(status_code=500, detail=f"测试失败: {str(e)}") 
+
+@router.get("/collection/preview")
+async def preview_collection(collection_name: str = 'my_finterm_collection'):
+    """
+    预览集合内容，返回总数和前10条数据
+    """
+    try:
+        chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+        collection_names = [c.name for c in chroma_client.list_collections()]
+        if collection_name not in collection_names:
+            return {
+                "status": "error",
+                "message": f"集合 '{collection_name}' 不存在"
+            }
+        collection = chroma_client.get_collection(name=collection_name)
+        total = collection.count()
+        # 获取前10条数据
+        preview = collection.get(limit=10, include=["documents", "metadatas"])
+        items = []
+        for i in range(len(preview["ids"])):
+            items.append({
+                "id": preview["ids"][i],
+                "document": preview["documents"][i] if i < len(preview["documents"]) else None,
+                "metadata": preview["metadatas"][i] if i < len(preview["metadatas"]) else None
+            })
+        return {
+            "status": "success",
+            "collection_name": collection_name,
+            "total": total,
+            "items": items
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"集合预览失败: {str(e)}"
+        } 
