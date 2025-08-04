@@ -13,7 +13,7 @@ FINTERM_CATEGORIES = {
     'E': {
         'name': 'Equities', 
         'description': '股权类（股票）',
-        'keywords': ['股票', '股权', '股本', '普通股', '优先股', '股份', 'A股', '港股', '美股']
+        'keywords': ['股票', '股权', '股本', '普通股', '优先股', '股份', 'A股', '港股', '美股', 'A-share', 'B-share', 'H-share', 'N-share', 'S-share', 'A-Share', 'B-Share', 'H-Share', 'N-Share', 'S-Share']
     },
     'D': {
         'name': 'Debt Instruments', 
@@ -63,7 +63,7 @@ FINTERM_CATEGORIES = {
     'L': {
         'name': 'Financing', 
         'description': '融资工具',
-        'keywords': ['贷款', '融资', '信贷', '票据', '商业票据', '融资券', '信用证', '银团贷款']
+        'keywords': ['贷款', '融资', '信贷', '票据', '商业票据', '融资券', '信用证', '银团贷款', 'A Round Financing', 'B Round Financing', 'C Round Financing', 'Seed Round', 'Series A', 'Series B', 'Series C', 'Venture Capital', 'Private Equity', 'IPO', 'Initial Public Offering', 'ABA Bank Index']
     },
     'Y': {
         'name': 'Non-listed & Other', 
@@ -92,9 +92,13 @@ class FinancialTermRecognizer:
         self.min_term_length = 3
 
     def predict(self, text, min_confidence=0.6):
+        # 获取偏移量映射以保留原始文本格式
         inputs = self.tokenizer(text, return_tensors="pt",
                               truncation=True,
-                              max_length=512)
+                              max_length=512,
+                              return_offsets_mapping=True)
+
+        offset_mapping = inputs.pop('offset_mapping').squeeze(0)
 
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -104,89 +108,112 @@ class FinancialTermRecognizer:
         preds = torch.argmax(probs, dim=-1)[0]
         confs = torch.max(probs, dim=-1).values[0]
 
-        # 转换token到原始文本位置
-        tokens = self.tokenizer.convert_ids_to_tokens(inputs["input_ids"][0])
-        words = self.tokenizer.batch_decode(inputs["input_ids"][0])
-        
-        # 获取标记位置信息
-        token_positions = self._get_token_positions(text, tokens, words)
+        # 获取tokens用于处理
+        token_ids = inputs["input_ids"][0].tolist()
+        tokens = self.tokenizer.convert_ids_to_tokens(token_ids)
 
+        # 使用偏移量映射重建术语
         results = []
         current_term = []
-        current_conf = 0.0
-        current_start_pos = -1
+        current_conf = []
+        current_indices = []
 
-        for i, (token, word, pred, conf) in enumerate(zip(tokens, words, preds, confs)):
-            if token in ["[CLS]", "[SEP]", "[PAD]"]:
+        for i, (token, pred, conf, offset) in enumerate(zip(tokens, preds, confs, offset_mapping)):
+            start, end = offset.tolist()
+
+            # 跳过特殊token
+            if token in ["[CLS]", "[SEP]", "[PAD]"] or start == end:
                 continue
 
             label = self.label_map.get(pred.item(), "O")
-            conf_value = conf.item()
-            position = token_positions.get(i, None)
+            conf = conf.item()
 
             # 只处理金融术语标签且置信度达标
-            if label.startswith("B-") and conf_value >= min_confidence and position:
-                # 如果有正在处理的术语，先保存它
+            if label == "B-FIN" and conf >= min_confidence:
+                # 保存当前术语
                 if current_term and len("".join(current_term)) >= self.min_term_length:
-                    term_text = "".join(current_term)
-                    avg_conf = current_conf / len(current_term)
-                    end_pos = position[0] # 当前token开始位置就是上一个术语的结束位置
+                    term_text = self._reconstruct_term(text, current_indices)
+                    avg_conf = sum(current_conf) / len(current_conf)
+                    start_pos = current_indices[0][0] if current_indices else 0
+                    end_pos = current_indices[-1][1] if current_indices else 0
                     
                     results.append({
                         "term": term_text,
                         "confidence": avg_conf,
-                        "start_pos": current_start_pos,
+                        "start_pos": start_pos,
                         "end_pos": end_pos,
-                        "label": label[2:] if label.startswith("B-") else "FIN" # 默认为FIN
+                        "label": "FIN"
                     })
 
-                # 开始新的术语
-                current_term = [word]
-                current_conf = conf_value
-                current_start_pos = position[0]
+                # 开始新术语
+                current_term = [text[start:end]]
+                current_conf = [conf]
+                current_indices = [(start, end)]
 
-            elif label.startswith("I-") and current_term and conf_value >= min_confidence:
-                current_term.append(word)
-                current_conf += conf_value
+            elif label == "I-FIN" and current_term and conf >= min_confidence:
+                # 继续当前术语
+                current_term.append(text[start:end])
+                current_conf.append(conf)
+                current_indices.append((start, end))
+
+            else:
+                # 非金融术语，结束当前术语
+                if current_term and len("".join(current_term)) >= self.min_term_length:
+                    term_text = self._reconstruct_term(text, current_indices)
+                    avg_conf = sum(current_conf) / len(current_conf)
+                    start_pos = current_indices[0][0] if current_indices else 0
+                    end_pos = current_indices[-1][1] if current_indices else 0
+                    
+                    results.append({
+                        "term": term_text,
+                        "confidence": avg_conf,
+                        "start_pos": start_pos,
+                        "end_pos": end_pos,
+                        "label": "FIN"
+                    })
+                current_term = []
+                current_conf = []
+                current_indices = []
 
         # 添加最后一个术语
-        if current_term and len("".join(current_term)) >= self.min_term_length and current_start_pos >= 0:
-            term_text = "".join(current_term)
-            avg_conf = current_conf / len(current_term)
-            # 估计结束位置，如果没有更好的方法
-            end_pos = current_start_pos + len(term_text)
+        if current_term and len("".join(current_term)) >= self.min_term_length:
+            term_text = self._reconstruct_term(text, current_indices)
+            avg_conf = sum(current_conf) / len(current_conf)
+            start_pos = current_indices[0][0] if current_indices else 0
+            end_pos = current_indices[-1][1] if current_indices else 0
             
             results.append({
                 "term": term_text,
                 "confidence": avg_conf,
-                "start_pos": current_start_pos,
+                "start_pos": start_pos,
                 "end_pos": end_pos,
-                "label": "FIN" # 默认为FIN
+                "label": "FIN"
             })
 
         return results
+
+    def _reconstruct_term(self, text, indices):
+        """使用原始文本偏移量重建术语"""
+        if not indices:
+            return ""
+
+        # 按起始位置排序
+        indices.sort(key=lambda x: x[0])
+
+        # 重建术语文本
+        term_text = ""
+        prev_end = indices[0][0]
+
+        for start, end in indices:
+            # 添加缺失的文本（如空格）
+            if start > prev_end:
+                term_text += text[prev_end:start]
+            term_text += text[start:end]
+            prev_end = end
+
+        return term_text
     
-    def _get_token_positions(self, text, tokens, words):
-        """尝试将token映射到原始文本中的位置"""
-        positions = {}
-        current_pos = 0
-        
-        for i, (token, word) in enumerate(zip(tokens, words)):
-            if token in ["[CLS]", "[SEP]", "[PAD]"]:
-                continue
-                
-            # 清理token和word
-            clean_word = word.strip()
-            if not clean_word:
-                continue
-                
-            # 在当前位置后查找此单词
-            pos = text.find(clean_word, current_pos)
-            if pos >= 0:
-                positions[i] = (pos, pos + len(clean_word))
-                current_pos = pos + len(clean_word)
-                
-        return positions
+
 
 # 懒加载的识别器
 _recognizer = None
@@ -206,6 +233,55 @@ def get_recognizer():
             print(f"加载金融术语识别器失败: {e}")
             return None
     return _recognizer
+
+def generate_highlighted_text(text, entities):
+    """生成带有高亮标记的文本"""
+    if not entities:
+        return text
+    
+    # 按开始位置排序实体
+    sorted_entities = sorted(entities, key=lambda x: x["开始字符位置"])
+    
+    # 构建高亮文本
+    highlighted_parts = []
+    last_end = 0
+    
+    for entity in sorted_entities:
+        start_pos = entity["开始字符位置"]
+        end_pos = entity["结束字符位置"]
+        entity_text = entity["识别实体"]
+        entity_type = entity.get("实体分类", "FIN")
+        
+        # 添加实体前的普通文本
+        if start_pos > last_end:
+            highlighted_parts.append({
+                "text": text[last_end:start_pos],
+                "type": "normal",
+                "highlight": False
+            })
+        
+        # 添加高亮的实体文本
+        highlighted_parts.append({
+            "text": entity_text,
+            "type": "entity",
+            "entity_type": entity_type,
+            "highlight": True,
+            "start_pos": start_pos,
+            "end_pos": end_pos,
+            "confidence": entity.get("识别分数", 0)
+        })
+        
+        last_end = end_pos
+    
+    # 添加最后的普通文本
+    if last_end < len(text):
+        highlighted_parts.append({
+            "text": text[last_end:],
+            "type": "normal",
+            "highlight": False
+        })
+    
+    return highlighted_parts
 
 def assign_entity_type(entity_text, selected_classifications):
     """根据实体文本内容分配最可能的实体类型"""
@@ -247,7 +323,15 @@ def extract_entities_with_rule_engine(text, selected_classifications):
         base_confidence = term_info['confidence']
         
         # 查找术语的所有出现位置
-        for match in re.finditer(term, text):
+        # 对于英文术语，使用不区分大小写的匹配
+        if any(c.isascii() for c in term):
+            # 英文术语，使用不区分大小写的正则表达式
+            pattern = re.compile(re.escape(term), re.IGNORECASE)
+        else:
+            # 中文术语，使用区分大小写的匹配
+            pattern = re.compile(re.escape(term))
+            
+        for match in pattern.finditer(text):
             start_idx = match.start()
             end_idx = match.end()
             matched_text = text[start_idx:end_idx]
@@ -285,17 +369,32 @@ async def perform_finterm_ner(
         recognizer = get_recognizer()
         
         if recognizer:
-            # 使用新的识别器
-            predicted_terms = recognizer.predict(text, min_confidence=0.6)
+            print(f"\n=== NER模型识别结果 ===")
+            # 使用新的识别器，降低置信度阈值以捕获更多实体
+            predicted_terms = recognizer.predict(text, min_confidence=0.4)
             
-            for term_info in predicted_terms:
+            print(f"模型识别到 {len(predicted_terms)} 个候选实体:")
+            
+            for i, term_info in enumerate(predicted_terms, 1):
                 term = term_info["term"]
                 confidence = term_info["confidence"]
                 start_pos = term_info["start_pos"]
                 end_pos = term_info["end_pos"]
                 
+                print(f"  {i}. 实体: '{term}'")
+                print(f"     置信度: {confidence:.4f}")
+                print(f"     位置: [{start_pos}, {end_pos}]")
+                print(f"     长度: {len(term)} 字符")
+                
+                # 过滤掉太长的实体（可能是整个句子）
+                if len(term) > 50:  # 如果实体超过50个字符，跳过
+                    print(f"     ✗ 跳过：实体太长")
+                    continue
+                    
                 # 分配实体类型
                 entity_type = assign_entity_type(term, selected_classifications)
+                print(f"     分类: {entity_type}")
+                print(f"     ✓ 保留")
                 
                 entities.append({
                     "原始单词": term,
@@ -305,20 +404,85 @@ async def perform_finterm_ner(
                     "开始字符位置": start_pos,
                     "结束字符位置": end_pos
                 })
+            
+            print(f"模型最终保留 {len(entities)} 个实体")
         
-        # 如果模型未能识别出实体，则使用规则引擎作为备选方案
-        if not entities:
-            entities = extract_entities_with_rule_engine(text, selected_classifications)
+        # 使用规则引擎作为补充，确保能识别到所有预定义的金融术语
+        print(f"\n=== 规则引擎识别结果 ===")
+        rule_entities = extract_entities_with_rule_engine(text, selected_classifications)
         
-        # 去重 - 基于开始和结束位置
-        unique_entities = {}
+        print(f"规则引擎识别到 {len(rule_entities)} 个实体:")
+        for i, entity in enumerate(rule_entities, 1):
+            term = entity.get("识别实体", "")
+            category = entity.get("实体分类", "")
+            score = entity.get("识别分数", "")
+            start_pos = entity.get("开始字符位置", "")
+            end_pos = entity.get("结束字符位置", "")
+            
+            print(f"  {i}. 实体: '{term}'")
+            print(f"     分类: {category}")
+            print(f"     置信度: {score}")
+            print(f"     位置: [{start_pos}, {end_pos}]")
+        
+        entities.extend(rule_entities)
+        print(f"合并后总实体数: {len(entities)}")
+        
+        # 去重和过滤逻辑
+        print(f"\n=== 去重和过滤过程 ===")
+        
+        # 1. 首先按长度排序，优先保留更长的匹配项
+        entities.sort(key=lambda x: len(x.get("识别实体", "")), reverse=True)
+        print(f"按长度排序后的实体:")
+        for i, entity in enumerate(entities, 1):
+            term = entity.get("识别实体", "")
+            print(f"  {i}. '{term}' (长度: {len(term)})")
+        
+        # 2. 过滤掉重叠的实体，优先保留更长的
+        filtered_entities = []
         for entity in entities:
-            key = (entity["开始字符位置"], entity["结束字符位置"])
-            if key not in unique_entities or unique_entities[key]["识别分数"] < entity["识别分数"]:
-                unique_entities[key] = entity
+            term = entity.get("识别实体", "").strip()
+            start_pos = entity.get("开始字符位置", 0)
+            end_pos = entity.get("结束字符位置", 0)
+            
+            print(f"\n检查实体: '{term}' (位置: [{start_pos}, {end_pos}])")
+            
+            # 跳过空实体或太短的实体
+            if not term or len(term) < 3:
+                print(f"  ✗ 跳过：实体太短或为空")
+                continue
+                
+            # 检查是否与已有实体重叠
+            is_overlapping = False
+            overlapping_entity = None
+            for existing_entity in filtered_entities:
+                existing_start = existing_entity.get("开始字符位置", 0)
+                existing_end = existing_entity.get("结束字符位置", 0)
+                existing_term = existing_entity.get("识别实体", "")
+                
+                # 检查重叠
+                if (start_pos < existing_end and end_pos > existing_start):
+                    is_overlapping = True
+                    overlapping_entity = existing_term
+                    break
+            
+            if is_overlapping:
+                print(f"  ✗ 跳过：与已有实体 '{overlapping_entity}' 重叠")
+            else:
+                print(f"  ✓ 保留：无重叠")
+                filtered_entities.append(entity)
         
-        # 转换为列表并按开始位置排序
-        sorted_entities = sorted(unique_entities.values(), key=lambda x: x["开始字符位置"])
+        print(f"\n过滤后保留 {len(filtered_entities)} 个实体")
+        
+        # 3. 按开始位置排序
+        sorted_entities = sorted(filtered_entities, key=lambda x: x["开始字符位置"])
+        print(f"最终排序后的实体:")
+        for i, entity in enumerate(sorted_entities, 1):
+            term = entity.get("识别实体", "")
+            start_pos = entity.get("开始字符位置", 0)
+            end_pos = entity.get("结束字符位置", 0)
+            score = entity.get("识别分数", 0)
+            category = entity.get("实体分类", "")
+            print(f"  {i}. '{term}' (位置: [{start_pos}, {end_pos}], 分数: {score}, 分类: {category})")
         
         # 构建返回结果
         result = {
@@ -327,6 +491,7 @@ async def perform_finterm_ner(
             "选择分类": selected_classifications,
             "识别实体数": len(sorted_entities),
             "实体详情": sorted_entities,
+            "高亮文本": generate_highlighted_text(text, sorted_entities),
         }
         
         return result

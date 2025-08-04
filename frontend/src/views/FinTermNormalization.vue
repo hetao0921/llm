@@ -230,8 +230,15 @@
                   </div>
                 </template>
                 <div class="text-content normalized">
-                  <span v-for="(char, index) in inputText" :key="index" 
-                        :class="getHighlightClass(index)">{{ char }}</span>
+                  <template v-for="(part, index) in normalizationResults.高亮文本" :key="index">
+                    <span
+                      v-if="part.highlight"
+                      :class="['entity', part.entity_type]"
+                      :title="`类型: ${getClassificationName(part.entity_type)}\n置信度: ${(part.confidence * 100).toFixed(2)}%`"
+                      style="color: red; font-weight: bold;"
+                    >{{ part.text }}</span>
+                    <span v-else>{{ part.text }}</span>
+                  </template>
                 </div>
               </el-card>
             </el-col>
@@ -447,6 +454,12 @@ const performNormalization = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// 获取分类名称
+const getClassificationName = (code) => {
+  const classification = classifications.find(c => c.code === code)
+  return classification ? `${classification.description} (${classification.code})` : code
 }
 
 // 在组件挂载时初始化分类选择

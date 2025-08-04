@@ -284,17 +284,19 @@ def find_similar_terms(text: str, model_name: str, provider: str, db_type: str, 
                     
                     for i, metadata in enumerate(all_data['metadatas']):
                         # 简单相似度计算 - 字符重叠率
-                        norm_term = metadata.get('finterm_normalization', '').lower()
+                        norm_term = metadata.get('finterm_normalization', '')
                         if not norm_term:
                             continue
                             
+                        # 保持原始大小写进行匹配，但为了相似度计算使用小写
+                        norm_term_lower = norm_term.lower()
                         text_lower = text.lower()
                         # 计算简单的相似度分数
-                        common = set(text_lower) & set(norm_term)
+                        common = set(text_lower) & set(norm_term_lower)
                         if not common:
                             continue
                             
-                        score = len(common) / max(len(text_lower), len(norm_term))
+                        score = len(common) / max(len(text_lower), len(norm_term_lower))
                         if score > best_score:
                             best_score = score
                             best_match = metadata
@@ -309,6 +311,55 @@ def find_similar_terms(text: str, model_name: str, provider: str, db_type: str, 
     except Exception as e:
         print(f"查询相似术语出错: {e}")
         return None
+
+def generate_highlighted_text(text, entities):
+    """生成带有高亮标记的文本"""
+    if not entities:
+        return text
+    
+    # 按开始位置排序实体
+    sorted_entities = sorted(entities, key=lambda x: x["开始字符位置"])
+    
+    # 构建高亮文本
+    highlighted_parts = []
+    last_end = 0
+    
+    for entity in sorted_entities:
+        start_pos = entity["开始字符位置"]
+        end_pos = entity["结束字符位置"]
+        entity_text = entity["识别实体"]
+        entity_type = entity.get("实体分类", "FIN")
+        
+        # 添加实体前的普通文本
+        if start_pos > last_end:
+            highlighted_parts.append({
+                "text": text[last_end:start_pos],
+                "type": "normal",
+                "highlight": False
+            })
+        
+        # 添加高亮的实体文本
+        highlighted_parts.append({
+            "text": entity_text,
+            "type": "entity",
+            "entity_type": entity_type,
+            "highlight": True,
+            "start_pos": start_pos,
+            "end_pos": end_pos,
+            "confidence": entity.get("识别实体识别分数", 0)
+        })
+        
+        last_end = end_pos
+    
+    # 添加最后的普通文本
+    if last_end < len(text):
+        highlighted_parts.append({
+            "text": text[last_end:],
+            "type": "normal",
+            "highlight": False
+        })
+    
+    return highlighted_parts
 
 @router.post("/normalize")
 async def normalize_finterm(
@@ -348,18 +399,32 @@ async def normalize_finterm(
         # 1. 使用NER模型识别实体
         recognizer = get_recognizer()
         if recognizer:
-            # 使用NER模型识别实体
-            predicted_terms = recognizer.predict(text, min_confidence=0.6)
-            for term_info in predicted_terms:
+            print(f"\n=== 标准化服务 - NER模型识别结果 ===")
+            # 使用NER模型识别实体，降低置信度阈值以捕获更多实体
+            predicted_terms = recognizer.predict(text, min_confidence=0.4)
+            
+            print(f"模型识别到 {len(predicted_terms)} 个候选实体:")
+            
+            for i, term_info in enumerate(predicted_terms, 1):
                 term = term_info["term"]
                 confidence = term_info["confidence"]
                 start_pos = term_info["start_pos"]
                 end_pos = term_info["end_pos"]
-                entity_type = term_info.get("label", "FIN")  # 默认为FIN类型
                 
-                # 判断是否在选择的分类中
-                if classifications and entity_type not in classifications:
-                    entity_type = classifications[0] if classifications else 'N/A'
+                print(f"  {i}. 实体: '{term}'")
+                print(f"     置信度: {confidence:.4f}")
+                print(f"     位置: [{start_pos}, {end_pos}]")
+                print(f"     长度: {len(term)} 字符")
+                
+                # 过滤掉太长的实体（可能是整个句子）
+                if len(term) > 50:  # 如果实体超过50个字符，跳过
+                    print(f"     ✗ 跳过：实体太长")
+                    continue
+                    
+                # 分配实体类型
+                entity_type = assign_entity_type(term, classifications)
+                print(f"     分类: {entity_type}")
+                print(f"     ✓ 保留")
                 
                 # 添加到识别实体列表
                 identified_entities.append({
@@ -374,24 +439,98 @@ async def normalize_finterm(
                     "金融术语标准化编码": "",
                     "匹配的标准化术语准确度": 0.0
                 })
+            
+            print(f"模型最终保留 {len(identified_entities)} 个实体")
         
-        # 如果NER模型未识别到实体，使用规则引擎
-        if not identified_entities:
-            print("NER模型未识别到实体，使用规则引擎进行识别")
-            rule_entities = extract_entities_with_rule_engine(text, classifications)
-            for entity in rule_entities:
-                identified_entities.append({
-                    "识别实体": entity["识别实体"],
-                    "实体分类": entity["实体分类"],
-                    "识别实体识别分数": entity["识别分数"],
-                    "开始字符位置": entity["开始字符位置"],
-                    "结束字符位置": entity["结束字符位置"],
-                    # 初始化其他必要字段
-                    "标准化术语": "",
-                    "标准化术语中文": "",
-                    "金融术语标准化编码": "",
-                    "匹配的标准化术语准确度": 0.0
-                })
+        # 2. 使用规则引擎作为补充
+        print(f"\n=== 标准化服务 - 规则引擎识别结果 ===")
+        rule_entities = extract_entities_with_rule_engine(text, classifications)
+        
+        print(f"规则引擎识别到 {len(rule_entities)} 个实体:")
+        for i, entity in enumerate(rule_entities, 1):
+            term = entity.get("识别实体", "")
+            category = entity.get("实体分类", "")
+            score = entity.get("识别分数", "")
+            start_pos = entity.get("开始字符位置", "")
+            end_pos = entity.get("结束字符位置", "")
+            
+            print(f"  {i}. 实体: '{term}'")
+            print(f"     分类: {category}")
+            print(f"     置信度: {score}")
+            print(f"     位置: [{start_pos}, {end_pos}]")
+            
+            # 添加到识别实体列表
+            identified_entities.append({
+                "识别实体": entity["识别实体"],
+                "实体分类": entity["实体分类"],
+                "识别实体识别分数": entity["识别分数"],
+                "开始字符位置": entity["开始字符位置"],
+                "结束字符位置": entity["结束字符位置"],
+                # 初始化其他必要字段
+                "标准化术语": "",
+                "标准化术语中文": "",
+                "金融术语标准化编码": "",
+                "匹配的标准化术语准确度": 0.0
+            })
+        
+        print(f"合并后总实体数: {len(identified_entities)}")
+        
+        # 3. 去重和过滤逻辑（与NER服务相同）
+        print(f"\n=== 标准化服务 - 去重和过滤过程 ===")
+        
+        # 按长度排序，优先保留更长的匹配项
+        identified_entities.sort(key=lambda x: len(x.get("识别实体", "")), reverse=True)
+        print(f"按长度排序后的实体:")
+        for i, entity in enumerate(identified_entities, 1):
+            term = entity.get("识别实体", "")
+            print(f"  {i}. '{term}' (长度: {len(term)})")
+        
+        # 过滤掉重叠的实体，优先保留更长的
+        filtered_entities = []
+        for entity in identified_entities:
+            term = entity.get("识别实体", "").strip()
+            start_pos = entity.get("开始字符位置", 0)
+            end_pos = entity.get("结束字符位置", 0)
+            
+            print(f"\n检查实体: '{term}' (位置: [{start_pos}, {end_pos}])")
+            
+            # 跳过空实体或太短的实体
+            if not term or len(term) < 3:
+                print(f"  ✗ 跳过：实体太短或为空")
+                continue
+                
+            # 检查是否与已有实体重叠
+            is_overlapping = False
+            overlapping_entity = None
+            for existing_entity in filtered_entities:
+                existing_start = existing_entity.get("开始字符位置", 0)
+                existing_end = existing_entity.get("结束字符位置", 0)
+                existing_term = existing_entity.get("识别实体", "")
+                
+                # 检查重叠
+                if (start_pos < existing_end and end_pos > existing_start):
+                    is_overlapping = True
+                    overlapping_entity = existing_term
+                    break
+            
+            if is_overlapping:
+                print(f"  ✗ 跳过：与已有实体 '{overlapping_entity}' 重叠")
+            else:
+                print(f"  ✓ 保留：无重叠")
+                filtered_entities.append(entity)
+        
+        print(f"\n过滤后保留 {len(filtered_entities)} 个实体")
+        
+        # 按开始位置排序
+        identified_entities = sorted(filtered_entities, key=lambda x: x["开始字符位置"])
+        print(f"最终排序后的实体:")
+        for i, entity in enumerate(identified_entities, 1):
+            term = entity.get("识别实体", "")
+            start_pos = entity.get("开始字符位置", 0)
+            end_pos = entity.get("结束字符位置", 0)
+            score = entity.get("识别实体识别分数", 0)
+            category = entity.get("实体分类", "")
+            print(f"  {i}. '{term}' (位置: [{start_pos}, {end_pos}], 分数: {score}, 分类: {category})")
                 
         print(f"识别到 {len(identified_entities)} 个实体")
         
@@ -436,6 +575,7 @@ async def normalize_finterm(
             "选择分类": classifications,
             "识别实体数": len(identified_entities),
             "实体详情": identified_entities,
+            "高亮文本": generate_highlighted_text(text, identified_entities),
             "status": "success"  # 保留status字段用于前端检查操作状态
         }
         

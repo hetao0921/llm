@@ -111,15 +111,14 @@
           <h3>文本高亮显示</h3>
           <div class="results-text-container">
             <div class="results-text">
-              <template v-for="(char, index) in nerResults.text" :key="index">
+              <template v-for="(part, index) in nerResults.highlightedText" :key="index">
                 <span
-                  :class="{
-                    'entity': nerResults.entities[index]?.entity,
-                    [nerResults.entities[index]?.entityType]: nerResults.entities[index]?.entity
-                  }"
-                  :title="nerResults.entities[index]?.entity ? 
-                    `类型: ${getClassificationName(nerResults.entities[index]?.entityType)}\n准确率: ${(nerResults.entities[index]?.confidence * 100).toFixed(2)}%` : ''"
-                >{{ char }}</span>
+                  v-if="part.highlight"
+                  :class="['entity', part.entity_type]"
+                  :title="`类型: ${getClassificationName(part.entity_type)}\n置信度: ${(part.confidence * 100).toFixed(2)}%`"
+                  style="color: red; font-weight: bold;"
+                >{{ part.text }}</span>
+                <span v-else>{{ part.text }}</span>
               </template>
             </div>
           </div>
@@ -285,35 +284,10 @@ const performNER = async () => {
     const data = await response.json()
     
     if (data.status === 'success') {
-      // 转换为所需格式
-      const text = data.用户输入内容
-      const entities = new Array(text.length).fill().map(() => ({
-        entity: false,
-        entityType: null,
-        confidence: 0
-      }))
-      
-      // 填充实体信息
-      for (const entityDetail of data.实体详情) {
-        const startPos = entityDetail.开始字符位置
-        const endPos = entityDetail.结束字符位置
-        const entityType = entityDetail.实体分类
-        const confidence = entityDetail.识别分数
-        
-        for (let i = startPos; i < endPos; i++) {
-          if (i >= 0 && i < text.length) {
-            entities[i] = {
-              entity: true,
-              entityType: entityType,
-              confidence: confidence
-            }
-          }
-        }
-      }
-      
+      // 使用后端提供的高亮数据
       nerResults.value = {
-        text: text,
-        entities: entities,
+        text: data.用户输入内容,
+        highlightedText: data.高亮文本 || [],
         summary: {
           totalEntities: data.识别实体数,
           selectedClassifications: data.选择分类,
