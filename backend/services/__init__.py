@@ -9,7 +9,8 @@ from . import (
     finterm_service,
     finterm_loading_service,
     finterm_ner_service,
-    finterm_normalization_service
+    finterm_normalization_service,
+    evaluation_service
 )
 
 __all__ = [
@@ -22,5 +23,6 @@ __all__ = [
     'finterm_service',
     'finterm_loading_service',
     'finterm_ner_service',
-    'finterm_normalization_service'
+    'finterm_normalization_service',
+    'evaluation_service'
 ] 

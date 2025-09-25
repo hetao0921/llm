@@ -8,6 +8,9 @@ const DocumentParsing = () => import('../views/DocumentParsing.vue')
 const VectorEmbedding = () => import('../views/VectorEmbedding.vue')
 const VectorIndexing = () => import('../views/VectorIndexing.vue')
 const TextGeneration = () => import('../views/TextGeneration.vue')
+const RAGEvaluation = () => import('../views/RAGEvaluation.vue')
+const RAGRetrieverEvaluation = () => import('../views/RAGRetrieverEvaluation.vue')
+const RAGGeneratorEvaluation = () => import('../views/RAGGeneratorEvaluation.vue')
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -52,6 +55,24 @@ const router = createRouter({
           name: 'TextGeneration',
           component: TextGeneration,
           meta: { title: '文本生成' }
+        },
+        {
+          path: 'rag-evaluation',
+          name: 'RAGEvaluation',
+          component: RAGEvaluation,
+          meta: { title: 'RAG系统评估' }
+        },
+        {
+          path: 'rag-retriever-evaluation',
+          name: 'RAGRetrieverEvaluation',
+          component: RAGRetrieverEvaluation,
+          meta: { title: 'RAG系统检索器评估' }
+        },
+        {
+          path: 'rag-generator-evaluation',
+          name: 'RAGGeneratorEvaluation',
+          component: RAGGeneratorEvaluation,
+          meta: { title: 'RAG系统生成器评估' }
         },
         // 新增金融术语标准化工具箱相关路由
         {

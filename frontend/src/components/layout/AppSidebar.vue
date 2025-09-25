@@ -46,6 +46,14 @@
         <el-menu-item index="/fin-term-ner">金融术语NER</el-menu-item>
         <el-menu-item index="/fin-term-normalization">金融术语标准化</el-menu-item>
       </el-sub-menu>
+      <el-sub-menu index="rag-evaluation">
+        <template #title>
+          <el-icon><TrendCharts /></el-icon>
+          <span>RAG系统评估</span>
+        </template>
+        <el-menu-item index="/rag-retriever-evaluation">RAG系统检索器评估</el-menu-item>
+        <el-menu-item index="/rag-generator-evaluation">RAG系统生成器评估</el-menu-item>
+      </el-sub-menu>
     </el-menu>
   </div>
 </template>
@@ -53,7 +61,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Upload, Document, Reading, Connection, Collection, ChatDotRound } from '@element-plus/icons-vue'
+import { Upload, Document, Reading, Connection, Collection, ChatDotRound, TrendCharts } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeRoute = computed(() => route.path)

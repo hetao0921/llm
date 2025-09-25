@@ -483,4 +483,64 @@ export const generationApi = {
   }
 }
 
+// RAG系统评估API
+export const evaluationApi = {
+  // 提交评估任务
+  submitEvaluation: (formData) => {
+    return api.post('/evaluation/submit', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      timeout: 300000 // 5分钟超时，因为评估可能需要较长时间
+    })
+  },
+  
+  // 获取评估结果
+  getEvaluationResult: (evaluationId) => {
+    return api.get(`/evaluation/result/${evaluationId}`)
+  },
+  
+  // 获取评估历史
+  getEvaluationHistory: () => {
+    return api.get('/evaluation/history')
+  },
+  
+  // 删除评估结果
+  deleteEvaluation: (evaluationId) => {
+    return api.delete(`/evaluation/${evaluationId}`)
+  },
+  
+  // 下载评估报告
+  downloadEvaluationReport: (evaluationId, format = 'json') => {
+    window.open(`/api/evaluation/${evaluationId}/download?format=${format}`, '_blank')
+    return Promise.resolve({ success: true })
+  }
+}
+
+// RAG检索器评估API
+export const ragRetrieverEvaluationApi = {
+  // 提交检索器评估
+  submitRetrieverEvaluation: (formData) => {
+    return api.post('/rag-retriever-evaluation/submit', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      timeout: 300000 // 5分钟超时
+    })
+  }
+}
+
+// RAG生成器评估API
+export const ragGeneratorEvaluationApi = {
+  // 提交生成器评估
+  submitGeneratorEvaluation: (formData) => {
+    return api.post('/rag-generator-evaluation/submit', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      timeout: 300000 // 5分钟超时
+    })
+  }
+}
+
 export default api 

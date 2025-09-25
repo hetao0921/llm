@@ -13,8 +13,10 @@ from config.settings import (
 from services import (
     loading_service, parsing_service, chunking_service, 
     embedding_service, indexing_service, generation_service,
-    finterm_service
+    finterm_service, evaluation_service
 )
+from services.rag_retriever_evaluation_service import router as rag_retriever_evaluation_router
+from services.rag_generator_evaluation_service import router as rag_generator_evaluation_router
 
 # 创建FastAPI应用
 app = FastAPI(title="RAG Framework API")
@@ -36,6 +38,9 @@ app.include_router(embedding_service.router, prefix="/api/embedding", tags=["向
 app.include_router(indexing_service.router, prefix="/api/indexing", tags=["向量索引"])
 app.include_router(generation_service.router, prefix="/api/generation", tags=["文本生成"])
 app.include_router(finterm_service.router, prefix="/api/finterm", tags=["金融术语"])
+app.include_router(evaluation_service.router, prefix="/api/evaluation", tags=["RAG系统评估"])
+app.include_router(rag_retriever_evaluation_router, prefix="/api/rag-retriever-evaluation", tags=["RAG检索器评估"])
+app.include_router(rag_generator_evaluation_router, prefix="/api/rag-generator-evaluation", tags=["RAG生成器评估"])
 
 # 确保数据目录存在
 @app.on_event("startup")
